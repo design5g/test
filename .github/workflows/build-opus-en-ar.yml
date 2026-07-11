@@ -21,7 +21,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
 
       - name: Install CPU conversion dependencies
         run: |
@@ -102,7 +101,6 @@ jobs:
           if missing:
               raise RuntimeError(f'Missing required output: {missing}')
 
-          # Runtime validation using the same APIs as the EASA translation service.
           translator = ctranslate2.Translator(
               str(OUTPUT),
               device='cpu',
