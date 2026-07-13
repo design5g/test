@@ -1,0 +1,39 @@
+name: Diagnose AI V4 Filtered Package
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Diagnose filtered package
+        shell: bash
+        run: |
+          exec > >(tee ai-v4-filter-diagnostic.log) 2>&1
+          for f in ai-v4-build/chunk_*.b64; do
+            echo "FILE=$f raw=$(wc -c < "$f")"
+            od -An -t x1 -N 8 "$f"
+            tail -c 12 "$f" | od -An -t x1
+            LC_ALL=C tr -cd 'A-Za-z0-9+/=' < "$f" > "$f.clean"
+            echo "clean=$(wc -c < "$f.clean")"
+            tail -c 12 "$f.clean" | od -An -t x1
+          done
+          cat ai-v4-build/chunk_*.b64.clean > ai-v4-filtered.b64
+          echo "TOTAL=$(wc -c < ai-v4-filtered.b64)"
+          tail -c 32 ai-v4-filtered.b64 | od -An -t x1
+          base64 -d ai-v4-filtered.b64 > ai-v4-filtered.tar.gz || true
+          wc -c ai-v4-filtered.tar.gz || true
+          sha256sum ai-v4-filtered.tar.gz || true
+          gzip -tv ai-v4-filtered.tar.gz || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ai-v4-filter-diagnostic-log
+          path: ai-v4-filter-diagnostic.log
+          retention-days: 7
