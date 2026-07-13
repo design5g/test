@@ -1,4 +1,4 @@
-name: Build Smart Health APK
+name: Build Smart Health AI APK
 
 on:
   pull_request:
@@ -20,32 +20,38 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Recreate Android project
+      - name: Recreate Android AI project
         id: recreate
         continue-on-error: true
         shell: bash
         run: |
           set -o pipefail
-          exec > >(tee reconstruct-v3.log) 2>&1
-          ls -l water-build/chunk_*.b64
-          wc -c water-build/chunk_*.b64
-          sha256sum water-build/chunk_*.b64
+          exec > >(tee reconstruct-v4-ai.log) 2>&1
           cat water-build/chunk_*.b64 > ishrab_v3.tar.gz.b64
-          wc -c ishrab_v3.tar.gz.b64
           base64 -d ishrab_v3.tar.gz.b64 > ishrab_v3.tar.gz
-          wc -c ishrab_v3.tar.gz
           gzip -t ishrab_v3.tar.gz
           tar -xzf ishrab_v3.tar.gz
           patch -p1 -d ishrab_v3 < water-build/v3-fix.patch
-          test -f ishrab_v3/app/build.gradle
-          tar -czf ishrab_v3_patched_source.tar.gz ishrab_v3
+          cat water-build/v4ai_*.b64 > v4-ai.patch.gz.b64
+          wc -c water-build/v4ai_*.b64 v4-ai.patch.gz.b64
+          sha256sum water-build/v4ai_*.b64 v4-ai.patch.gz.b64
+          base64 -d v4-ai.patch.gz.b64 > v4-ai.patch.gz
+          gzip -t v4-ai.patch.gz
+          gzip -dc v4-ai.patch.gz > v4-ai.patch
+          sha256sum v4-ai.patch
+          test "$(sha256sum v4-ai.patch | awk '{print $1}')" = "5522d79bed4abd2fd8ad784546ccc937ffb0da6780f39b589fd968118f00fb24"
+          patch -p1 -d ishrab_v3 < v4-ai.patch
+          test -f ishrab_v3/app/src/main/java/com/ishrab/smarthealth/LocalAiEngine.java
+          test -f ishrab_v3/app/src/main/assets/local_health_ai_v1.json
+          grep -q "com.ishrab.smarthealth.ai" ishrab_v3/app/build.gradle
+          tar -czf ishrab_v4_ai_source.tar.gz ishrab_v3
 
       - name: Upload reconstruction diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: smart-health-reconstruct-log
-          path: reconstruct-v3.log
+          name: smart-health-ai-reconstruct-log
+          path: reconstruct-v4-ai.log
           if-no-files-found: warn
           retention-days: 7
 
@@ -53,11 +59,11 @@ jobs:
         if: steps.recreate.outcome == 'failure'
         run: exit 1
 
-      - name: Upload patched source archive
+      - name: Upload AI source archive
         uses: actions/upload-artifact@v4
         with:
-          name: ishrab-smart-health-v3-source
-          path: ishrab_v3_patched_source.tar.gz
+          name: ishrab-smart-health-ai-v4-source
+          path: ishrab_v4_ai_source.tar.gz
           if-no-files-found: error
           retention-days: 7
 
@@ -76,35 +82,35 @@ jobs:
         shell: bash
         run: |
           keytool -genkeypair -v \
-            -keystore "$GITHUB_WORKSPACE/smart-health-release.jks" \
-            -storepass SmartHealth2026X \
-            -alias smarthealth \
-            -keypass SmartHealth2026X \
+            -keystore "$GITHUB_WORKSPACE/smart-health-ai-release.jks" \
+            -storepass SmartHealthAI2026X \
+            -alias smarthealthai \
+            -keypass SmartHealthAI2026X \
             -keyalg RSA \
             -keysize 2048 \
             -validity 10000 \
-            -dname "CN=Ishrab Smart Health,O=Local,C=JO"
+            -dname "CN=Ishrab Smart Health AI,O=Local,C=JO"
 
-      - name: Build signed release APK
+      - name: Build signed AI release APK
         id: build
         continue-on-error: true
         working-directory: ishrab_v3
         shell: bash
         env:
-          SIGN_STORE_FILE: ${{ github.workspace }}/smart-health-release.jks
-          SIGN_STORE_PASSWORD: SmartHealth2026X
-          SIGN_KEY_ALIAS: smarthealth
-          SIGN_KEY_PASSWORD: SmartHealth2026X
+          SIGN_STORE_FILE: ${{ github.workspace }}/smart-health-ai-release.jks
+          SIGN_STORE_PASSWORD: SmartHealthAI2026X
+          SIGN_KEY_ALIAS: smarthealthai
+          SIGN_KEY_PASSWORD: SmartHealthAI2026X
         run: |
           set -o pipefail
-          gradle --no-daemon assembleRelease 2>&1 | tee "$GITHUB_WORKSPACE/build-v3.log"
+          gradle --no-daemon assembleRelease 2>&1 | tee "$GITHUB_WORKSPACE/build-v4-ai.log"
 
       - name: Upload build diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: smart-health-build-log
-          path: build-v3.log
+          name: smart-health-ai-build-log
+          path: build-v4-ai.log
           if-no-files-found: warn
           retention-days: 7
 
@@ -112,17 +118,18 @@ jobs:
         if: steps.build.outcome == 'failure'
         run: exit 1
 
-      - name: Verify APK signature
+      - name: Verify APK signature and archive
         shell: bash
         run: |
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n1)
           "$APKSIGNER" verify --verbose --print-certs ishrab_v3/app/build/outputs/apk/release/app-release.apk
           unzip -t ishrab_v3/app/build/outputs/apk/release/app-release.apk
+          unzip -l ishrab_v3/app/build/outputs/apk/release/app-release.apk | grep -q local_health_ai_v1.json
 
-      - name: Upload APK
+      - name: Upload AI APK
         uses: actions/upload-artifact@v4
         with:
-          name: ishrab-smart-health-v3-apk
+          name: ishrab-smart-health-ai-v4-apk
           path: ishrab_v3/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 7
