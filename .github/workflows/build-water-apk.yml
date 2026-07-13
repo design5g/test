@@ -108,24 +108,28 @@ jobs:
 
       - name: Download and verify official Qwen model
         shell: bash
-        env:
-          HF_HUB_DOWNLOAD_TIMEOUT: '900'
-          HF_HUB_ETAG_TIMEOUT: '60'
-          HF_HUB_DISABLE_PROGRESS_BARS: '1'
         run: |
           set -euxo pipefail
-          python3 -m pip install --disable-pip-version-check --quiet "huggingface_hub>=0.33" hf_xet
-          python3 - <<'PY'
-          from huggingface_hub import hf_hub_download
-          path = hf_hub_download(
-              repo_id='Qwen/Qwen3-0.6B-GGUF',
-              filename='Qwen3-0.6B-Q8_0.gguf',
-              local_dir='ishrab_v3/app/src/main/assets',
-              force_download=True,
-          )
-          print(path)
-          PY
-          MODEL="ishrab_v3/app/src/main/assets/Qwen3-0.6B-Q8_0.gguf"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq aria2
+          ASSET_DIR="$GITHUB_WORKSPACE/ishrab_v3/app/src/main/assets"
+          MODEL="$ASSET_DIR/Qwen3-0.6B-Q8_0.gguf"
+          mkdir -p "$ASSET_DIR"
+          URL="https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf?download=true"
+          aria2c \
+            --allow-overwrite=true \
+            --auto-file-renaming=false \
+            --continue=true \
+            --connect-timeout=60 \
+            --max-connection-per-server=8 \
+            --max-tries=0 \
+            --min-split-size=4M \
+            --retry-wait=10 \
+            --split=8 \
+            --timeout=120 \
+            --dir="$ASSET_DIR" \
+            --out="Qwen3-0.6B-Q8_0.gguf" \
+            "$URL"
           test -f "$MODEL"
           test "$(sha256sum "$MODEL" | awk '{print $1}')" = "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031"
           test "$(stat -c%s "$MODEL")" -gt 600000000
