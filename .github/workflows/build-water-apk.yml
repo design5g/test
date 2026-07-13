@@ -29,17 +29,13 @@ jobs:
         run: |
           set -euxo pipefail
           exec > >(tee reconstruct-v5.log) 2>&1
-
           cat water-build/chunk_*.b64 > ishrab_v3.tar.gz.b64
           base64 -d ishrab_v3.tar.gz.b64 > ishrab_v3.tar.gz
           gzip -t ishrab_v3.tar.gz
           tar -xzf ishrab_v3.tar.gz
           patch -p1 -d ishrab_v3 < water-build/v3-fix.patch
 
-          cat water-build/v4fix06hex_0.txt water-build/v4fix06hex_1.txt \
-            | tr -d '\r\n ' \
-            | python3 -c 'import sys; sys.stdout.buffer.write(bytes.fromhex(sys.stdin.read()))' \
-            > corrected-06.b64
+          cat water-build/v4fix06hex_0.txt water-build/v4fix06hex_1.txt | tr -d '\r\n ' | python3 -c 'import sys; sys.stdout.buffer.write(bytes.fromhex(sys.stdin.read()))' > corrected-06.b64
           test "$(wc -c < corrected-06.b64)" = "4000"
           : > v4-ai.patch.gz.b64
           for i in $(seq -w 0 19); do
@@ -62,7 +58,6 @@ jobs:
           gzip -dc v5.patch.gz > v5.patch
           test "$(sha256sum v5.patch | awk '{print $1}')" = "f74a387d340fe47a2ae64edb7200fcb50445122b70ecf19e96b7aef30b00be11"
           patch -p1 -d ishrab_v3 < v5.patch
-
           test -f ishrab_v3/app/src/main/java/com/ishrab/smarthealth/RealLlmEngine.java
           test -f ishrab_v3/app/src/main/java/com/ishrab/smarthealth/QuickStatusNotification.java
           test -f ishrab_v3/app/src/main/cpp/CMakeLists.txt
@@ -91,7 +86,6 @@ jobs:
           git -C ishrab_v3/app/llama.cpp fetch --depth 1 origin 6eddde06a4f25d55d538b5d15628dcc2b6882147
           git -C ishrab_v3/app/llama.cpp checkout --detach FETCH_HEAD
           test "$(git -C ishrab_v3/app/llama.cpp rev-parse HEAD)" = "6eddde06a4f25d55d538b5d15628dcc2b6882147"
-
           python3 - <<'PY'
           from pathlib import Path
           p = Path('ishrab_v3/app/llama.cpp/examples/llama.android/lib/src/main/cpp/logging.h')
@@ -114,13 +108,25 @@ jobs:
 
       - name: Download and verify official Qwen model
         shell: bash
+        env:
+          HF_HUB_DOWNLOAD_TIMEOUT: '900'
+          HF_HUB_ETAG_TIMEOUT: '60'
+          HF_HUB_DISABLE_PROGRESS_BARS: '1'
         run: |
           set -euxo pipefail
+          python3 -m pip install --disable-pip-version-check --quiet "huggingface_hub>=0.33" hf_xet
+          python3 - <<'PY'
+          from huggingface_hub import hf_hub_download
+          path = hf_hub_download(
+              repo_id='Qwen/Qwen3-0.6B-GGUF',
+              filename='Qwen3-0.6B-Q8_0.gguf',
+              local_dir='ishrab_v3/app/src/main/assets',
+              force_download=True,
+          )
+          print(path)
+          PY
           MODEL="ishrab_v3/app/src/main/assets/Qwen3-0.6B-Q8_0.gguf"
-          mkdir -p "$(dirname "$MODEL")"
-          curl -L --fail --retry 6 --retry-all-errors --retry-delay 10 --connect-timeout 30 \
-            -o "$MODEL" \
-            "https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf?download=true"
+          test -f "$MODEL"
           test "$(sha256sum "$MODEL" | awk '{print $1}')" = "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031"
           test "$(stat -c%s "$MODEL")" -gt 600000000
           ls -lh "$MODEL"
@@ -129,11 +135,7 @@ jobs:
         shell: bash
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-            "platforms;android-35" \
-            "build-tools;35.0.0" \
-            "cmake;3.22.1" \
-            "ndk;27.2.12479018"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" "cmake;3.22.1" "ndk;27.2.12479018"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -143,15 +145,7 @@ jobs:
       - name: Create release signing key
         shell: bash
         run: |
-          keytool -genkeypair -v \
-            -keystore "$GITHUB_WORKSPACE/smart-health-qwen-v5.jks" \
-            -storepass SmartQwenV5_2026X \
-            -alias smartqwen \
-            -keypass SmartQwenV5_2026X \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -dname "CN=Ishrab Smart Health Qwen,O=Local,C=JO"
+          keytool -genkeypair -v -keystore "$GITHUB_WORKSPACE/smart-health-qwen-v5.jks" -storepass SmartQwenV5_2026X -alias smartqwen -keypass SmartQwenV5_2026X -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Ishrab Smart Health Qwen,O=Local,C=JO"
 
       - name: Build signed V5 release APK
         id: build
