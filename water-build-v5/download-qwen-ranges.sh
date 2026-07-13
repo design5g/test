@@ -68,4 +68,5 @@ done
 
 test "$(stat -c%s "$OUTPUT")" = "$EXPECTED_SIZE"
 test "$(sha256sum "$OUTPUT" | awk '{print $1}')" = "$EXPECTED_SHA256"
+rm -rf "$PARTS_DIR"
 echo "Verified Qwen model: $(ls -lh "$OUTPUT")"
