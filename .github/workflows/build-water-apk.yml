@@ -1,4 +1,4 @@
-name: Build Water APK
+name: Build Smart Health APK
 
 on:
   pull_request:
@@ -10,7 +10,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,11 +23,10 @@ jobs:
       - name: Recreate Android project
         shell: bash
         run: |
-          cat water-build/chunk_*.b64 > waterapp.tar.gz.b64
-          base64 -d waterapp.tar.gz.b64 > waterapp.tar.gz
-          tar -xzf waterapp.tar.gz
-          test -f waterapp/app/build.gradle
-          patch -p1 -d waterapp < water-build/fix.patch
+          cat water-build/chunk_*.b64 > ishrab_v3.tar.gz.b64
+          base64 -d ishrab_v3.tar.gz.b64 > ishrab_v3.tar.gz
+          tar -xzf ishrab_v3.tar.gz
+          test -f ishrab_v3/app/build.gradle
 
       - name: Set up Android SDK packages
         shell: bash
@@ -45,35 +43,35 @@ jobs:
         shell: bash
         run: |
           keytool -genkeypair -v \
-            -keystore "$GITHUB_WORKSPACE/water-release.jks" \
-            -storepass WaterApp2026X \
-            -alias water \
-            -keypass WaterApp2026X \
+            -keystore "$GITHUB_WORKSPACE/smart-health-release.jks" \
+            -storepass SmartHealth2026X \
+            -alias smarthealth \
+            -keypass SmartHealth2026X \
             -keyalg RSA \
             -keysize 2048 \
             -validity 10000 \
-            -dname "CN=Ishrab Maa Pro,O=Local,C=JO"
+            -dname "CN=Ishrab Smart Health,O=Local,C=JO"
 
       - name: Build signed release APK
         id: build
         continue-on-error: true
-        working-directory: waterapp
+        working-directory: ishrab_v3
         shell: bash
         env:
-          SIGN_STORE_FILE: ${{ github.workspace }}/water-release.jks
-          SIGN_STORE_PASSWORD: WaterApp2026X
-          SIGN_KEY_ALIAS: water
-          SIGN_KEY_PASSWORD: WaterApp2026X
+          SIGN_STORE_FILE: ${{ github.workspace }}/smart-health-release.jks
+          SIGN_STORE_PASSWORD: SmartHealth2026X
+          SIGN_KEY_ALIAS: smarthealth
+          SIGN_KEY_PASSWORD: SmartHealth2026X
         run: |
           set -o pipefail
-          gradle --no-daemon assembleRelease 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+          gradle --no-daemon assembleRelease 2>&1 | tee "$GITHUB_WORKSPACE/build-v3.log"
 
       - name: Upload build diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: water-build-log
-          path: build.log
+          name: smart-health-build-log
+          path: build-v3.log
           if-no-files-found: warn
           retention-days: 7
 
@@ -85,13 +83,13 @@ jobs:
         shell: bash
         run: |
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n1)
-          "$APKSIGNER" verify --verbose --print-certs waterapp/app/build/outputs/apk/release/app-release.apk
-          unzip -t waterapp/app/build/outputs/apk/release/app-release.apk
+          "$APKSIGNER" verify --verbose --print-certs ishrab_v3/app/build/outputs/apk/release/app-release.apk
+          unzip -t ishrab_v3/app/build/outputs/apk/release/app-release.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ishrab-maa-pro-apk
-          path: waterapp/app/build/outputs/apk/release/app-release.apk
+          name: ishrab-smart-health-v3-apk
+          path: ishrab_v3/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 7
