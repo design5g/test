@@ -36,6 +36,7 @@ jobs:
           wc -c ishrab_v3.tar.gz
           gzip -t ishrab_v3.tar.gz
           tar -xzf ishrab_v3.tar.gz
+          patch -p1 -d ishrab_v3 < water-build/v3-fix.patch
           test -f ishrab_v3/app/build.gradle
 
       - name: Upload reconstruction diagnostics
