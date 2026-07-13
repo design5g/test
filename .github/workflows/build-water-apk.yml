@@ -21,12 +21,35 @@ jobs:
           java-version: '17'
 
       - name: Recreate Android project
+        id: recreate
+        continue-on-error: true
         shell: bash
         run: |
+          set -o pipefail
+          exec > >(tee reconstruct-v3.log) 2>&1
+          ls -l water-build/chunk_*.b64
+          wc -c water-build/chunk_*.b64
+          sha256sum water-build/chunk_*.b64
           cat water-build/chunk_*.b64 > ishrab_v3.tar.gz.b64
+          wc -c ishrab_v3.tar.gz.b64
           base64 -d ishrab_v3.tar.gz.b64 > ishrab_v3.tar.gz
+          wc -c ishrab_v3.tar.gz
+          gzip -t ishrab_v3.tar.gz
           tar -xzf ishrab_v3.tar.gz
           test -f ishrab_v3/app/build.gradle
+
+      - name: Upload reconstruction diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smart-health-reconstruct-log
+          path: reconstruct-v3.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Stop after failed reconstruction
+        if: steps.recreate.outcome == 'failure'
+        run: exit 1
 
       - name: Set up Android SDK packages
         shell: bash
