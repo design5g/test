@@ -1,0 +1,53 @@
+name: Build Ishrab AI Health APK
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Reconstruct Android project
+        run: |
+          cat ai-v4-build/chunk_*.b64 > aiapp-v4.tar.gz.b64
+          base64 -d aiapp-v4.tar.gz.b64 > aiapp-v4.tar.gz
+          echo '811e6f2f417964601f0bf153ffd9da7c0590ae2ac01ffe4af0b8a38f3636498a  aiapp-v4.tar.gz' | sha256sum -c -
+          tar -xzf aiapp-v4.tar.gz
+          test -f aiapp/app/build.gradle
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Android SDK
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
+      - name: Signing key
+        run: |
+          keytool -genkeypair -v -keystore "$GITHUB_WORKSPACE/ai-release.jks" -storepass IshrabAI2026X -alias aihealth -keypass IshrabAI2026X -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Ishrab Smart AI,O=Local,C=JO"
+      - name: Build signed APK
+        working-directory: aiapp
+        env:
+          SIGN_STORE_FILE: ${{ github.workspace }}/ai-release.jks
+          SIGN_STORE_PASSWORD: IshrabAI2026X
+          SIGN_KEY_ALIAS: aihealth
+          SIGN_KEY_PASSWORD: IshrabAI2026X
+        run: gradle --no-daemon assembleRelease
+      - name: Verify APK
+        run: |
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n1)
+          "$APKSIGNER" verify --verbose --print-certs aiapp/app/build/outputs/apk/release/app-release.apk
+          unzip -t aiapp/app/build/outputs/apk/release/app-release.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ishrab-ai-health-v4-apk
+          path: aiapp/app/build/outputs/apk/release/app-release.apk
+          retention-days: 7
