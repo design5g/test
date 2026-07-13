@@ -24,6 +24,8 @@ jobs:
             echo "clean=$(wc -c < "$f.clean")"
             tail -c 12 "$f.clean" | od -An -t x1
           done
+          cp ai-v4-build/chunk_05.b64 chunk_05.raw
+          cp ai-v4-build/chunk_05.b64.clean chunk_05.clean
           cat ai-v4-build/chunk_*.b64.clean > ai-v4-filtered.b64
           echo "TOTAL=$(wc -c < ai-v4-filtered.b64)"
           tail -c 32 ai-v4-filtered.b64 | od -An -t x1
@@ -35,5 +37,8 @@ jobs:
         if: always()
         with:
           name: ai-v4-filter-diagnostic-log
-          path: ai-v4-filter-diagnostic.log
+          path: |
+            ai-v4-filter-diagnostic.log
+            chunk_05.raw
+            chunk_05.clean
           retention-days: 7
