@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-URL="https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf?download=true"
+URL="https://www.modelscope.cn/models/Qwen/Qwen3-0.6B-GGUF/resolve/master/Qwen3-0.6B-Q8_0.gguf"
 EXPECTED_SIZE=639446688
 EXPECTED_SHA256="9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031"
 CHUNK_SIZE=$((16 * 1024 * 1024))
@@ -33,7 +33,7 @@ while [ "$start" -lt "$EXPECTED_SIZE" ]; do
           --retry 5 --retry-all-errors --retry-delay 5 \
           --range "$start-$end" \
           --output "$part.tmp" \
-          "${URL}&range_nonce=${start}_${attempt}"; then
+          "$URL"; then
         actual=$(stat -c%s "$part.tmp" 2>/dev/null || echo 0)
         if [ "$actual" = "$expected" ]; then
           mv "$part.tmp" "$part"
