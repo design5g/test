@@ -28,6 +28,7 @@ jobs:
           base64 -d waterapp.tar.gz.b64 > waterapp.tar.gz
           tar -xzf waterapp.tar.gz
           test -f waterapp/app/build.gradle
+          patch -p1 -d waterapp < water-build/fix.patch
 
       - name: Set up Android SDK packages
         shell: bash
