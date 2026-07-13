@@ -128,7 +128,7 @@ jobs:
           ASSET_DIR="$GITHUB_WORKSPACE/ishrab_v3/app/src/main/assets"
           INPUT="$ASSET_DIR/Qwen3-0.6B-Q8_0.gguf"
           OUTPUT="$ASSET_DIR/Qwen3-0.6B-Q4_K_M.gguf"
-          llama-host-build/bin/llama-quantize "$INPUT" "$OUTPUT" Q4_K_M
+          llama-host-build/bin/llama-quantize --allow-requantize "$INPUT" "$OUTPUT" Q4_K_M
           test -f "$OUTPUT"
           size=$(stat -c%s "$OUTPUT")
           sha=$(sha256sum "$OUTPUT" | awk '{print $1}')
