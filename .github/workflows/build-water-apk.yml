@@ -92,6 +92,26 @@ jobs:
           git -C ishrab_v3/app/llama.cpp checkout --detach FETCH_HEAD
           test "$(git -C ishrab_v3/app/llama.cpp rev-parse HEAD)" = "6eddde06a4f25d55d538b5d15628dcc2b6882147"
 
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('ishrab_v3/app/llama.cpp/examples/llama.android/lib/src/main/cpp/logging.h')
+          s = p.read_text()
+          old = '''static inline int ai_should_log(int prio) {
+              return __android_log_is_loggable(prio, LOG_TAG, LOG_MIN_LEVEL);
+          }'''
+          new = '''static inline int ai_should_log(int prio) {
+          #if __ANDROID_API__ >= 30
+              return __android_log_is_loggable(prio, LOG_TAG, LOG_MIN_LEVEL);
+          #else
+              return prio >= LOG_MIN_LEVEL;
+          #endif
+          }'''
+          if old not in s:
+              raise SystemExit('Expected llama.cpp logging function was not found')
+          p.write_text(s.replace(old, new))
+          PY
+          grep -q "__ANDROID_API__ >= 30" ishrab_v3/app/llama.cpp/examples/llama.android/lib/src/main/cpp/logging.h
+
       - name: Download and verify official Qwen model
         shell: bash
         run: |
