@@ -1,0 +1,41 @@
+name: Diagnose AI V4 Package
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect and reconstruct
+        id: inspect
+        continue-on-error: true
+        shell: bash
+        run: |
+          exec > >(tee ai-v4-diagnostic.log) 2>&1
+          ls -l ai-v4-build
+          wc -c ai-v4-build/chunk_*.b64
+          sha256sum ai-v4-build/chunk_*.b64
+          cat ai-v4-build/chunk_*.b64 > ai-v4-all.b64
+          wc -c ai-v4-all.b64
+          tail -c 100 ai-v4-all.b64
+          echo
+          base64 -d ai-v4-all.b64 > ai-v4.tar.gz
+          wc -c ai-v4.tar.gz
+          sha256sum ai-v4.tar.gz
+          gzip -tv ai-v4.tar.gz
+          tar -tzf ai-v4.tar.gz | head -30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ai-v4-diagnostic-log
+          path: ai-v4-diagnostic.log
+          retention-days: 7
+      - name: Fail if inspection failed
+        if: steps.inspect.outcome == 'failure'
+        run: exit 1
