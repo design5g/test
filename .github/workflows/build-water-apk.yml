@@ -121,7 +121,7 @@ jobs:
           mkdir -p "$ASSET_DIR"
           success=0
           for attempt in 1 2 3 4 5; do
-            echo "HTTP model download attempt $attempt"
+            echo "Model download attempt $attempt"
             if python3 - <<'PY'
           from huggingface_hub import hf_hub_download
           path = hf_hub_download(
@@ -141,7 +141,8 @@ jobs:
           test "$success" = "1"
           test -f "$MODEL"
           test "$(sha256sum "$MODEL" | awk '{print $1}')" = "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031"
-          test "$(stat -c%s "$MODEL")" -gt 600000000
+          test "$(stat -c%s "$MODEL")" = "639446688"
+          test ! -d "${MODEL}.parts"
           ls -lh "$MODEL"
 
       - name: Upload model transfer diagnostics
@@ -210,11 +211,56 @@ jobs:
           unzip -p "$APK" assets/Qwen3-0.6B-Q8_0.gguf | sha256sum | grep -F "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031"
           ls -lh "$APK"
 
-      - name: Upload Qwen V5 APK
+      - name: Split verified APK for transfer
+        shell: bash
+        run: |
+          set -euxo pipefail
+          APK="ishrab_v3/app/build/outputs/apk/release/app-release.apk"
+          mkdir -p apk-transfer
+          split -b 300000000 -d -a 2 "$APK" apk-transfer/ishrab-smart-health-qwen-v5.apk.part-
+          test -f apk-transfer/ishrab-smart-health-qwen-v5.apk.part-00
+          test -f apk-transfer/ishrab-smart-health-qwen-v5.apk.part-01
+          test -f apk-transfer/ishrab-smart-health-qwen-v5.apk.part-02
+          test ! -f apk-transfer/ishrab-smart-health-qwen-v5.apk.part-03
+          sha256sum "$APK" > apk-transfer/apk.sha256
+          stat -c '%s' "$APK" > apk-transfer/apk.size
+          sha256sum apk-transfer/ishrab-smart-health-qwen-v5.apk.part-* > apk-transfer/parts.sha256
+          ls -lh apk-transfer
+
+      - name: Upload APK part 00
         uses: actions/upload-artifact@v4
         with:
-          name: ishrab-smart-health-qwen-v5-apk
-          path: ishrab_v3/app/build/outputs/apk/release/app-release.apk
-          if-no-files-found: error
+          name: ishrab-v5-apk-part-00
+          path: apk-transfer/ishrab-smart-health-qwen-v5.apk.part-00
           compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload APK part 01
+        uses: actions/upload-artifact@v4
+        with:
+          name: ishrab-v5-apk-part-01
+          path: apk-transfer/ishrab-smart-health-qwen-v5.apk.part-01
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload APK part 02
+        uses: actions/upload-artifact@v4
+        with:
+          name: ishrab-v5-apk-part-02
+          path: apk-transfer/ishrab-smart-health-qwen-v5.apk.part-02
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload APK metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: ishrab-v5-apk-metadata
+          path: |
+            apk-transfer/apk.sha256
+            apk-transfer/apk.size
+            apk-transfer/parts.sha256
+          if-no-files-found: error
           retention-days: 7
