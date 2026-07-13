@@ -23,8 +23,9 @@ jobs:
         run: |
           set -euo pipefail
           for f in ai-v4-build/chunk_*.b64; do
-            tr -d '\r\n' < "$f" | sed 's/\\n//g'
+            LC_ALL=C tr -cd 'A-Za-z0-9+/=' < "$f"
           done > aiapp-v4.tar.gz.b64
+          test "$(wc -c < aiapp-v4.tar.gz.b64)" -eq 24488
           base64 -d aiapp-v4.tar.gz.b64 > aiapp-v4.tar.gz
           echo '811e6f2f417964601f0bf153ffd9da7c0590ae2ac01ffe4af0b8a38f3636498a  aiapp-v4.tar.gz' | sha256sum -c -
           gzip -t aiapp-v4.tar.gz
