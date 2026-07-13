@@ -38,6 +38,7 @@ jobs:
           tar -xzf ishrab_v3.tar.gz
           patch -p1 -d ishrab_v3 < water-build/v3-fix.patch
           test -f ishrab_v3/app/build.gradle
+          tar -czf ishrab_v3_patched_source.tar.gz ishrab_v3
 
       - name: Upload reconstruction diagnostics
         if: always()
@@ -51,6 +52,14 @@ jobs:
       - name: Stop after failed reconstruction
         if: steps.recreate.outcome == 'failure'
         run: exit 1
+
+      - name: Upload patched source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: ishrab-smart-health-v3-source
+          path: ishrab_v3_patched_source.tar.gz
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Set up Android SDK packages
         shell: bash
