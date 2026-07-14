@@ -1,0 +1,55 @@
+name: Probe LFM2.5 ExecuTorch PTE
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Search Hugging Face for public ExecuTorch PTE artifacts
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY' | tee lfm-executorch-pte.txt
+          import json, urllib.parse, urllib.request
+          queries=['LFM2.5 ExecuTorch','LFM2 ExecuTorch','LFM2.5 pte','LiquidAI ExecuTorch']
+          seen=set()
+          for q in queries:
+              url='https://huggingface.co/api/models?search='+urllib.parse.quote(q)+'&limit=100&full=true&config=true'
+              with urllib.request.urlopen(url, timeout=120) as r:
+                  rows=json.load(r)
+              print('\nQUERY',q,'COUNT',len(rows))
+              for row in rows:
+                  mid=row.get('id')
+                  if not mid or mid in seen: continue
+                  seen.add(mid)
+                  api='https://huggingface.co/api/models/'+urllib.parse.quote(mid, safe='/')+'?blobs=true'
+                  try:
+                      with urllib.request.urlopen(api, timeout=120) as r: info=json.load(r)
+                  except Exception as e:
+                      print('ERR',mid,type(e).__name__,e); continue
+                  ptes=[]
+                  for s in info.get('siblings',[]):
+                      n=s.get('rfilename','')
+                      if n.endswith('.pte') or n.endswith('.ptd') or 'executorch' in n.lower():
+                          l=s.get('lfs') or {}
+                          ptes.append((n,l.get('size'),l.get('sha256')))
+                  if ptes:
+                      print('MODEL',mid,'sha',info.get('sha'),'gated',info.get('gated'),'private',info.get('private'),'license',(info.get('cardData') or {}).get('license'))
+                      for x in ptes: print(' FILE',x)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lfm-executorch-pte-probe
+          path: lfm-executorch-pte.txt
+          retention-days: 3
