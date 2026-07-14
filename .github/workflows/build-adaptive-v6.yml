@@ -55,7 +55,7 @@ jobs:
           test "$(sha256sum v4-ai.patch | awk '{print $1}')" = "5522d79bed4abd2fd8ad784546ccc937ffb0da6780f39b589fd968118f00fb24"
           patch -p1 -d ishrab_v3 < v4-ai.patch
 
-          tr -d '\r\n ' < water-build-v6/v6code.b64 > v6-code.patch.gz.b64
+          cat water-build-v6/v6code_??.b64 | tr -d '\r\n ' > v6-code.patch.gz.b64
           test "$(wc -c < v6-code.patch.gz.b64)" = "29168"
           base64 -d v6-code.patch.gz.b64 > v6-code.patch.gz
           gzip -t v6-code.patch.gz
