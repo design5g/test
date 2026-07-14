@@ -20,9 +20,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          curl --fail --location --retry 5 --retry-all-errors \
-            -o mnn-chat-0.8.3.apk \
-            https://meta.alicdn.com/data/mnn/apks/mnn_chat_0_8_3.apk
+          curl --fail --location --retry 5 --retry-all-errors -o mnn-chat-0.8.3.apk https://meta.alicdn.com/data/mnn/apks/mnn_chat_0_8_3.apk
           sha256sum mnn-chat-0.8.3.apk | tee mnn-apk.sha256
           unzip -l mnn-chat-0.8.3.apk | grep 'lib/arm64-v8a/.*\.so' | tee mnn-arm64-libs.txt
           mkdir -p mnn-apk
@@ -31,44 +29,60 @@ jobs:
             echo "===== $f ====="
             readelf -d "$f" | grep NEEDED || true
           done | tee mnn-needed.txt
-      - name: Inspect official MNN LFM2.5 package
+      - name: Inspect official MNN LFM2.5 package metadata
+        continue-on-error: true
         shell: bash
         run: |
-          set -euxo pipefail
-          python3 -m pip install --quiet huggingface_hub
+          set -x
+          curl -sS -D hf-headers.txt -o hf-model.json -w '%{http_code}\n' https://huggingface.co/api/models/taobao-mnn/LFM2.5-1.2B-Instruct-MNN | tee hf-status.txt
           python3 - <<'PY' | tee lfm25-mnn-files.txt
-          from huggingface_hub import HfApi
-          repo='taobao-mnn/LFM2.5-1.2B-Instruct-MNN'
-          info=HfApi().model_info(repo, files_metadata=True)
-          print('repo', repo)
-          print('sha', info.sha)
-          print('license', getattr(info.card_data, 'license', None) if info.card_data else None)
-          total=0
-          for s in info.siblings:
-              size=getattr(s,'size',None)
-              print('FILE',s.rfilename,'SIZE',size,'BLOB',getattr(s,'blob_id',None),'LFS',getattr(s,'lfs',None))
-              if size: total += size
-          print('TOTAL_BYTES',total)
+          import json
+          from pathlib import Path
+          p=Path('hf-model.json')
+          print(p.read_text(errors='replace')[:2000])
+          try:
+              d=json.loads(p.read_text())
+              print('id', d.get('id'), 'sha', d.get('sha'), 'private', d.get('private'), 'gated', d.get('gated'))
+              total=0
+              for s in d.get('siblings',[]):
+                  print('FILE',s.get('rfilename'),s.get('size'),s.get('blobId'),s.get('lfs'))
+                  total += int(s.get('size') or 0)
+              print('TOTAL_BYTES', total)
+          except Exception as e:
+              print('JSON_ERROR',repr(e))
           PY
-      - name: Inspect official JNI/runtime build linkage
+      - name: Inspect official JNI runtime linkage
+        if: always()
         shell: bash
         run: |
           set -euxo pipefail
           git clone --depth 1 https://github.com/alibaba/MNN.git MNN
           git -C MNN rev-parse HEAD | tee mnn-source-commit.txt
-          sed -n '1,180p' MNN/apps/Android/MnnLlmChat/app/src/main/cpp/CMakeLists.txt > mnn-cmake.txt
-          grep -nE 'target_link_libraries|add_library|find_library|LIB_PATH|libMNN|llm' MNN/apps/Android/MnnLlmChat/app/src/main/cpp/CMakeLists.txt | tee mnn-cmake-linkage.txt
-          grep -nE 'Java_.*Llm|createLLM|set_config|load\(|response\(|syncPromptCache|generate\(1\)' MNN/apps/Android/MnnLlmChat/app/src/main/cpp/llm_mnn_jni.cpp MNN/apps/Android/MnnLlmChat/app/src/main/cpp/llm_session.cpp | head -250 | tee mnn-jni-api.txt
+          cp MNN/apps/Android/MnnLlmChat/app/src/main/cpp/CMakeLists.txt mnn-cmake.txt
+          grep -nE 'target_link_libraries|add_library|find_library|LIB_PATH|libMNN|llm' MNN/apps/Android/MnnLlmChat/app/src/main/cpp/CMakeLists.txt | tee mnn-cmake-linkage.txt || true
+          grep -nE 'Java_.*Llm|createLLM|set_config|load\(|response\(|syncPromptCache|generate\(1\)|reuse_kv' MNN/apps/Android/MnnLlmChat/app/src/main/cpp/llm_mnn_jni.cpp MNN/apps/Android/MnnLlmChat/app/src/main/cpp/llm_session.cpp | head -300 | tee mnn-jni-api.txt || true
+          cp MNN/apps/Android/MnnLlmChat/app/src/main/cpp/llm_mnn_jni.cpp official-llm-mnn-jni.cpp
+          cp MNN/apps/Android/MnnLlmChat/app/src/main/cpp/llm_session.cpp official-llm-session.cpp
+          cp MNN/apps/Android/MnnLlmChat/app/src/main/cpp/llm_session.h official-llm-session.h
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: mnn-v9-probe
           path: |
             mnn-apk.sha256
             mnn-arm64-libs.txt
             mnn-needed.txt
+            mnn-apk/lib/arm64-v8a/*.so
+            hf-headers.txt
+            hf-status.txt
+            hf-model.json
             lfm25-mnn-files.txt
             mnn-source-commit.txt
             mnn-cmake.txt
             mnn-cmake-linkage.txt
             mnn-jni-api.txt
+            official-llm-mnn-jni.cpp
+            official-llm-session.cpp
+            official-llm-session.h
+          if-no-files-found: warn
           retention-days: 3
