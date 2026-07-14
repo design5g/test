@@ -1,0 +1,1 @@
+Trigger PR CI after trusted workflow was installed on main.
