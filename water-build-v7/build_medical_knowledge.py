@@ -76,12 +76,10 @@ def qa_records(repo: Path) -> Iterable[dict[str, str]]:
 
 def make_candidates(qa: dict[str, str]) -> Iterable[tuple[str, str, str]]:
     q, answer, focus, qtype = qa["question"], qa["answer"], qa["focus"], qa["qtype"]
-    # Full answer: canonical QA unit.
     yield q, answer[:MAX_EVIDENCE], "qa"
     chunks = sentence_chunks(answer)
     for idx, evidence in enumerate(chunks):
         yield q, evidence[:MAX_EVIDENCE], "evidence"
-        # Contextual retrieval aliases point to the exact same source evidence.
         if focus:
             yield f"{focus} {qtype}".strip(), evidence[:MAX_EVIDENCE], "focus_type"
         if qtype:
@@ -175,6 +173,7 @@ def build(repo: Path, output: Path) -> dict[str, object]:
     }
     db.executemany("INSERT INTO metadata(key,value) VALUES(?,?)", metadata.items())
     db.execute("ANALYZE")
+    db.commit()
     db.execute("VACUUM")
     db.close()
 
