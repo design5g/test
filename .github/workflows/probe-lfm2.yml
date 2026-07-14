@@ -12,31 +12,35 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Query official LiquidAI repositories
+      - name: Query Hugging Face API
         shell: bash
         run: |
           set -euxo pipefail
-          python3 -m pip install --quiet huggingface_hub
+          curl -L --fail --show-error 'https://huggingface.co/api/models?author=LiquidAI&search=LFM2-350M&limit=30&full=true' -o models.json
           python3 - <<'PY' | tee lfm2-probe.txt
-          from huggingface_hub import HfApi
-          api=HfApi()
-          models=list(api.list_models(author='LiquidAI', search='LFM2-350M', limit=30, full=True))
+          import json, urllib.request
+          models=json.load(open('models.json'))
+          print('COUNT',len(models))
           for m in models:
-              print('MODEL',m.id,'downloads',m.downloads,'private',m.private,'gated',getattr(m,'gated',None))
+              mid=m.get('id')
+              print('MODEL',mid,'sha',m.get('sha'),'downloads',m.get('downloads'),'gated',m.get('gated'),'private',m.get('private'))
+              url='https://huggingface.co/api/models/'+mid+'?blobs=true'
               try:
-                  info=api.model_info(m.id, files_metadata=True)
-                  print('sha',info.sha,'license',getattr(info,'card_data',{}).get('license') if getattr(info,'card_data',None) else None)
-                  for s in info.siblings:
-                      print('FILE',s.rfilename,'size',getattr(s,'size',None),'blob',getattr(s,'blob_id',None))
+                  with urllib.request.urlopen(url, timeout=60) as r:
+                      info=json.load(r)
+                  print('LICENSE',(info.get('cardData') or {}).get('license'))
+                  for s in info.get('siblings',[]):
+                      lfs=s.get('lfs') or {}
+                      print('FILE',s.get('rfilename'),'size',lfs.get('size'),'sha256',lfs.get('sha256'))
               except Exception as e:
                   print('ERR',type(e).__name__,str(e))
           PY
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: lfm2-probe
-          path: lfm2-probe.txt
-          if-no-files-found: error
+          path: |
+            lfm2-probe.txt
+            models.json
+          if-no-files-found: warn
           retention-days: 3
