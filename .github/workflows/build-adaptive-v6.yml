@@ -1,0 +1,227 @@
+name: Build Adaptive Health AI V6 APK
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Recreate V4 source and apply V6 patch
+        id: recreate
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euxo pipefail
+          exec > >(tee reconstruct-v6.log) 2>&1
+
+          cat water-build/chunk_*.b64 > ishrab_v3.tar.gz.b64
+          base64 -d ishrab_v3.tar.gz.b64 > ishrab_v3.tar.gz
+          gzip -t ishrab_v3.tar.gz
+          tar -xzf ishrab_v3.tar.gz
+          patch -p1 -d ishrab_v3 < water-build/v3-fix.patch
+
+          cat water-build/v4fix06hex_0.txt water-build/v4fix06hex_1.txt \
+            | tr -d '\r\n ' \
+            | python3 -c 'import sys; sys.stdout.buffer.write(bytes.fromhex(sys.stdin.read()))' \
+            > corrected-06.b64
+          test "$(wc -c < corrected-06.b64)" = "4000"
+
+          : > v4-ai.patch.gz.b64
+          for i in $(seq -w 0 19); do
+            f="water-build/v4ai_${i}.b64"
+            if [ "$i" = "06" ]; then f="corrected-06.b64"; fi
+            tr -d '\r\n ' < "$f" >> v4-ai.patch.gz.b64
+          done
+          test "$(wc -c < v4-ai.patch.gz.b64)" = "76216"
+          base64 -d v4-ai.patch.gz.b64 > v4-ai.patch.gz
+          gzip -t v4-ai.patch.gz
+          gzip -dc v4-ai.patch.gz > v4-ai.patch
+          test "$(sha256sum v4-ai.patch | awk '{print $1}')" = "5522d79bed4abd2fd8ad784546ccc937ffb0da6780f39b589fd968118f00fb24"
+          patch -p1 -d ishrab_v3 < v4-ai.patch
+
+          tr -d '\r\n ' < water-build-v6/v6code.b64 > v6-code.patch.gz.b64
+          test "$(wc -c < v6-code.patch.gz.b64)" = "29168"
+          base64 -d v6-code.patch.gz.b64 > v6-code.patch.gz
+          gzip -t v6-code.patch.gz
+          gzip -dc v6-code.patch.gz > v6-code.patch
+          test "$(sha256sum v6-code.patch | awk '{print $1}')" = "889ae1696ba0704000e7717fd2f0f4f31121b92a4e9e13bb26b86dd256ae87d5"
+          patch -p1 -d ishrab_v3 < v6-code.patch
+
+          rm -f ishrab_v3/app/src/main/assets/local_health_ai_v1.json
+          test -f ishrab_v3/app/src/main/java/com/ishrab/smarthealth/LearningMemory.java
+          test -f ishrab_v3/app/src/main/java/com/ishrab/smarthealth/QuickStatusNotification.java
+          test -f ishrab_v3/app/src/main/java/com/ishrab/smarthealth/QuickLogReceiver.java
+          grep -q 'com.ishrab.smarthealth.ai.memory' ishrab_v3/app/build.gradle
+          grep -q 'versionName "6.0"' ishrab_v3/app/build.gradle
+
+      - name: Upload reconstruction diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: adaptive-v6-reconstruction-log
+          path: reconstruct-v6.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Stop after failed reconstruction
+        if: steps.recreate.outcome == 'failure'
+        run: exit 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Train and audit 10000-example local model
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 -m pip install --disable-pip-version-check --quiet scikit-learn==1.8.0
+          MODEL="ishrab_v3/app/src/main/assets/local_health_ai_v2.json"
+          python3 water-build-v6/train_model.py "$MODEL" | tee train-v6.log
+          test -f "$MODEL"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('ishrab_v3/app/src/main/assets/local_health_ai_v2.json')
+          m = json.loads(p.read_text())
+          assert m['training_examples'] == 10000
+          assert m['intent_count'] == 20
+          assert len(m['classes']) == 20
+          assert len(m['vocabulary']) == 3200
+          assert len(m['idf']) == 3200
+          assert len(m['coefficients']) == 20
+          assert all(len(row) == 3200 for row in m['coefficients'])
+          assert m['learning']['persistent_memory'] is True
+          assert m['learning']['automatic_forgetting'] is False
+          print('model audit passed', p.stat().st_size, m['validation_accuracy'])
+          PY
+          sha256sum "$MODEL" > trained-model.sha256
+          stat -c '%s' "$MODEL" > trained-model.size
+
+      - name: Set up Android SDK
+        shell: bash
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Create release signing key
+        shell: bash
+        run: |
+          keytool -genkeypair -v \
+            -keystore "$GITHUB_WORKSPACE/ishrab-adaptive-v6.jks" \
+            -storepass AdaptiveV6_2026X \
+            -alias adaptivev6 \
+            -keypass AdaptiveV6_2026X \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Ishrab Adaptive Health AI,O=Local,C=JO"
+
+      - name: Build signed adaptive V6 APK
+        id: build
+        continue-on-error: true
+        working-directory: ishrab_v3
+        shell: bash
+        env:
+          SIGN_STORE_FILE: ${{ github.workspace }}/ishrab-adaptive-v6.jks
+          SIGN_STORE_PASSWORD: AdaptiveV6_2026X
+          SIGN_KEY_ALIAS: adaptivev6
+          SIGN_KEY_PASSWORD: AdaptiveV6_2026X
+          GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx3072m
+        run: |
+          set -o pipefail
+          gradle --no-daemon assembleRelease 2>&1 | tee "$GITHUB_WORKSPACE/build-v6.log"
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: adaptive-v6-build-log
+          path: |
+            build-v6.log
+            train-v6.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Stop after failed compilation
+        if: steps.build.outcome == 'failure'
+        run: exit 1
+
+      - name: Verify APK, signature and embedded model
+        shell: bash
+        run: |
+          set -euxo pipefail
+          APK="ishrab_v3/app/build/outputs/apk/release/app-release.apk"
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n1)
+          AAPT2=$(find "$ANDROID_HOME/build-tools" -name aapt2 -type f | sort -V | tail -n1)
+
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          unzip -t "$APK"
+          unzip -l "$APK" | grep -F 'assets/local_health_ai_v2.json'
+          unzip -l "$APK" | grep -F 'classes.dex'
+          unzip -p "$APK" assets/local_health_ai_v2.json > embedded-model.json
+
+          python3 - <<'PY'
+          import json
+          m = json.load(open('embedded-model.json'))
+          assert m['training_examples'] == 10000
+          assert m['intent_count'] == 20
+          assert len(m['vocabulary']) == 3200
+          assert m['learning']['persistent_memory'] is True
+          print('embedded model verified')
+          PY
+
+          "$AAPT2" dump badging "$APK" | tee apk-badging.txt
+          grep -F "package: name='com.ishrab.smarthealth.ai.memory'" apk-badging.txt
+          "$AAPT2" dump permissions "$APK" | tee apk-permissions.txt
+          if grep -Fq 'android.permission.INTERNET' apk-permissions.txt; then
+            echo 'Unexpected INTERNET permission' >&2
+            exit 1
+          fi
+
+          sha256sum "$APK" > apk.sha256
+          stat -c '%s' "$APK" > apk.size
+          ls -lh "$APK"
+
+      - name: Upload adaptive V6 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ishrab-adaptive-ai-v6-apk
+          path: ishrab_v3/app/build/outputs/apk/release/app-release.apk
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload verification metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: ishrab-adaptive-ai-v6-metadata
+          path: |
+            apk.sha256
+            apk.size
+            trained-model.sha256
+            trained-model.size
+            apk-badging.txt
+            apk-permissions.txt
+          if-no-files-found: error
+          retention-days: 7
