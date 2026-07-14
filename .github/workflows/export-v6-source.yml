@@ -1,0 +1,33 @@
+name: Export V6 Source
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Reconstruct V6 source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          bash water-build-v6/build-v6-source.sh
+          tar -czf ishrab-v6-source.tar.gz ishrab_v3
+          sha256sum ishrab-v6-source.tar.gz
+          ls -lh ishrab-v6-source.tar.gz
+      - name: Upload source
+        uses: actions/upload-artifact@v4
+        with:
+          name: ishrab-v6-source
+          path: ishrab-v6-source.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 3
