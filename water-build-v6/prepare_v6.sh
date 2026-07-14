@@ -32,6 +32,7 @@ gzip -t v6-code.patch.gz
 gzip -dc v6-code.patch.gz > v6-code.patch
 test "$(sha256sum v6-code.patch | awk '{print $1}')" = "889ae1696ba0704000e7717fd2f0f4f31121b92a4e9e13bb26b86dd256ae87d5"
 patch -p1 -d ishrab_v3 < v6-code.patch
+patch -p1 -d ishrab_v3 < water-build-v6/v6-compile-fix.patch
 
 rm -f ishrab_v3/app/src/main/assets/local_health_ai_v1.json
 test -f ishrab_v3/app/src/main/java/com/ishrab/smarthealth/LearningMemory.java
