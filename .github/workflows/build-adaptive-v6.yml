@@ -1,0 +1,127 @@
+name: Build Adaptive Health AI V6 APK
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Recreate source and train adaptive model
+        shell: bash
+        run: bash water-build-v6/prepare_v6.sh 2>&1 | tee prepare-v6.log
+
+      - name: Set up Android SDK
+        shell: bash
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Create release signing key
+        shell: bash
+        run: |
+          keytool -genkeypair -v \
+            -keystore "$GITHUB_WORKSPACE/ishrab-adaptive-v6.jks" \
+            -storepass AdaptiveV6_2026X \
+            -alias adaptivev6 \
+            -keypass AdaptiveV6_2026X \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Ishrab Adaptive Health AI,O=Local,C=JO"
+
+      - name: Build signed adaptive V6 APK
+        working-directory: ishrab_v3
+        shell: bash
+        env:
+          SIGN_STORE_FILE: ${{ github.workspace }}/ishrab-adaptive-v6.jks
+          SIGN_STORE_PASSWORD: AdaptiveV6_2026X
+          SIGN_KEY_ALIAS: adaptivev6
+          SIGN_KEY_PASSWORD: AdaptiveV6_2026X
+          GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx3072m
+        run: |
+          set -o pipefail
+          gradle --no-daemon assembleRelease 2>&1 | tee "$GITHUB_WORKSPACE/build-v6.log"
+
+      - name: Verify APK, signature and embedded model
+        shell: bash
+        run: |
+          set -euxo pipefail
+          APK="ishrab_v3/app/build/outputs/apk/release/app-release.apk"
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n1)
+          AAPT2=$(find "$ANDROID_HOME/build-tools" -name aapt2 -type f | sort -V | tail -n1)
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          unzip -t "$APK"
+          unzip -l "$APK" | grep -F 'assets/local_health_ai_v2.json'
+          unzip -l "$APK" | grep -F 'classes.dex'
+          unzip -p "$APK" assets/local_health_ai_v2.json > embedded-model.json
+          python3 - <<'PY'
+          import json
+          m=json.load(open('embedded-model.json'))
+          assert m['training_examples']==10000
+          assert m['intent_count']==20
+          assert len(m['vocabulary'])==3200
+          assert m['learning']['persistent_memory'] is True
+          assert m['learning']['automatic_forgetting'] is False
+          print('embedded adaptive model verified')
+          PY
+          "$AAPT2" dump badging "$APK" | tee apk-badging.txt
+          grep -F "package: name='com.ishrab.smarthealth.ai.memory'" apk-badging.txt
+          "$AAPT2" dump permissions "$APK" | tee apk-permissions.txt
+          if grep -Fq 'android.permission.INTERNET' apk-permissions.txt; then
+            echo 'Unexpected INTERNET permission' >&2
+            exit 1
+          fi
+          sha256sum "$APK" > apk.sha256
+          stat -c '%s' "$APK" > apk.size
+          ls -lh "$APK"
+
+      - name: Upload adaptive V6 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ishrab-adaptive-ai-v6-apk
+          path: ishrab_v3/app/build/outputs/apk/release/app-release.apk
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload diagnostics and metadata
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ishrab-adaptive-ai-v6-metadata
+          path: |
+            prepare-v6.log
+            build-v6.log
+            train-v6.log
+            apk.sha256
+            apk.size
+            trained-model.sha256
+            trained-model.size
+            apk-badging.txt
+            apk-permissions.txt
+          if-no-files-found: warn
+          retention-days: 7

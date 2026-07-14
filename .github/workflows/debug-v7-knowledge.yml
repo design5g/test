@@ -1,0 +1,60 @@
+name: Debug V7 Knowledge Build
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Recreate source
+        run: bash water-build-v7/prepare_v7.sh >/dev/null 2>&1
+      - name: Fetch MedQuAD
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --filter=blob:none --no-checkout https://github.com/abachaa/MedQuAD.git medquad
+          git -C medquad fetch --depth 1 origin 577bd37b96c02d1833b2c9eed2de9f96964e96cb
+          git -C medquad checkout --detach FETCH_HEAD
+      - name: Build knowledge with full diagnostics
+        id: knowledge
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 water-build-v7/build_medical_knowledge.py medquad ishrab_v3/app/src/main/assets/medical_knowledge_100k.db 2>&1 | tee knowledge-debug.log
+      - name: Inspect partial DB
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY' 2>&1 | tee -a knowledge-debug.log
+          from pathlib import Path
+          import sqlite3
+          p=Path('ishrab_v3/app/src/main/assets/medical_knowledge_100k.db')
+          print('db_exists',p.exists(),'size',p.stat().st_size if p.exists() else 0)
+          if p.exists():
+              c=sqlite3.connect(p)
+              for table in ['knowledge','knowledge_fts','metadata']:
+                  try: print(table,c.execute(f'select count(*) from {table}').fetchone()[0])
+                  except Exception as e: print(table,'ERROR',repr(e))
+              c.close()
+          PY
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v7-knowledge-debug
+          path: knowledge-debug.log
+          if-no-files-found: error
+          retention-days: 3
+      - name: Fail after diagnostics
+        if: steps.knowledge.outcome == 'failure'
+        run: exit 1

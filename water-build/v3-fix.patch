@@ -1,0 +1,11 @@
+--- a/app/src/main/java/com/ishrab/smarthealth/MainActivity.java
++++ b/app/src/main/java/com/ishrab/smarthealth/MainActivity.java
+@@ -236,7 +236,7 @@
+         return sv;
+     }
+ 
+-    private View bottleRow(JSONObject o){if(o==null)return new View(this);LinearLayout r=row();r.setGravity(Gravity.CENTER_VERTICAL);r.setPadding(0,dp(9),0,dp(3));String id=o.optString("id"),name=o.optString("name"),ml=o.optInt("ml");LinearLayout tx=column();tx.addView(label(name,15,text,Gravity.START));tx.addView(sub(ml+" "+(ar?"مل":"mL")+" · "+id));r.addView(tx,new LinearLayout.LayoutParams(0,-2,1));TextView use=chip(ar?"تسجيل":"Log",success);use.setOnClickListener(v->{store.addWater(ml,1,"water",0,id);afterDataChange();});r.addView(use);TextView qr=chip("QR",accent);LinearLayout.LayoutParams qlp=new LinearLayout.LayoutParams(-2,-2);qlp.setMarginStart(dp(6));r.addView(qr,qlp);qr.setOnClickListener(v->showQr(id,name,ml));TextView nfc=chip("NFC",warning);LinearLayout.LayoutParams nlp=new LinearLayout.LayoutParams(-2,-2);nlp.setMarginStart(dp(6));r.addView(nfc,nlp);nfc.setOnClickListener(v->armNfc(id));return r;}
++    private View bottleRow(JSONObject o){if(o==null)return new View(this);LinearLayout r=row();r.setGravity(Gravity.CENTER_VERTICAL);r.setPadding(0,dp(9),0,dp(3));String id=o.optString("id"),name=o.optString("name");int ml=o.optInt("ml");LinearLayout tx=column();tx.addView(label(name,15,text,Gravity.START));tx.addView(sub(ml+" "+(ar?"مل":"mL")+" · "+id));r.addView(tx,new LinearLayout.LayoutParams(0,-2,1));TextView use=chip(ar?"تسجيل":"Log",success);use.setOnClickListener(v->{store.addWater(ml,1,"water",0,id);afterDataChange();});r.addView(use);TextView qr=chip("QR",accent);LinearLayout.LayoutParams qlp=new LinearLayout.LayoutParams(-2,-2);qlp.setMarginStart(dp(6));r.addView(qr,qlp);qr.setOnClickListener(v->showQr(id,name,ml));TextView nfc=chip("NFC",warning);LinearLayout.LayoutParams nlp=new LinearLayout.LayoutParams(-2,-2);nlp.setMarginStart(dp(6));r.addView(nfc,nlp);nfc.setOnClickListener(v->armNfc(id));return r;}
+ 
+     private View settingsScreen(){
+         ScrollView sv=scroll();LinearLayout c=column();sv.addView(c);c.addView(title(ar?"الإعدادات والخصوصية":"Settings and privacy"));

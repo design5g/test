@@ -1,0 +1,46 @@
+name: Probe LFM2 350M Official Files
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Query Hugging Face API
+        shell: bash
+        run: |
+          set -euxo pipefail
+          curl -L --fail --show-error 'https://huggingface.co/api/models?author=LiquidAI&search=LFM2-350M&limit=30&full=true' -o models.json
+          python3 - <<'PY' | tee lfm2-probe.txt
+          import json, urllib.request
+          models=json.load(open('models.json'))
+          print('COUNT',len(models))
+          for m in models:
+              mid=m.get('id')
+              print('MODEL',mid,'sha',m.get('sha'),'downloads',m.get('downloads'),'gated',m.get('gated'),'private',m.get('private'))
+              url='https://huggingface.co/api/models/'+mid+'?blobs=true'
+              try:
+                  with urllib.request.urlopen(url, timeout=60) as r:
+                      info=json.load(r)
+                  print('LICENSE',(info.get('cardData') or {}).get('license'))
+                  for s in info.get('siblings',[]):
+                      lfs=s.get('lfs') or {}
+                      print('FILE',s.get('rfilename'),'size',lfs.get('size'),'sha256',lfs.get('sha256'))
+              except Exception as e:
+                  print('ERR',type(e).__name__,str(e))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lfm2-probe
+          path: |
+            lfm2-probe.txt
+            models.json
+          if-no-files-found: warn
+          retention-days: 3

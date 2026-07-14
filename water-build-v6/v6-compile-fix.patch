@@ -1,0 +1,13 @@
+--- a/app/src/main/java/com/ishrab/smarthealth/LocalAiEngine.java
++++ b/app/src/main/java/com/ishrab/smarthealth/LocalAiEngine.java
+@@ -181,9 +181,7 @@
+ 
+         String learned = memory.findCorrection(question);
+         if (!learned.isEmpty()) {
+-            String note = replyAr ? "إجابة متعلمة من تصحيحك السابق:
+-" : "Answer learned from your previous correction:
+-";
++            String note = replyAr ? "إجابة متعلمة من تصحيحك السابق:\n" : "Answer learned from your previous correction:\n";
+             return finish(question,"correction",0.98,note + learned,replyAr);
+         }
+ 

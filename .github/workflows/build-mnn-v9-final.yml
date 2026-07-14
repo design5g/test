@@ -1,0 +1,236 @@
+name: Build MNN Health AI V9 Final APK
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Recreate V9 source and audit patch
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cat water-build-v9/v9patch_0?.b64 | tr -d '\r\n ' > v9.patch.gz.b64
+          test "$(wc -c < v9.patch.gz.b64)" = "40080"
+          base64 -d v9.patch.gz.b64 > v9.patch.gz
+          test "$(sha256sum v9.patch.gz | awk '{print $1}')" = "0a688e880b664bc02f254340e8c3f63ab26c932c289e7917f6699ca6f0603c6d"
+          gzip -t v9.patch.gz
+          gzip -dc v9.patch.gz > v9.patch
+          test "$(sha256sum v9.patch | awk '{print $1}')" = "be9338e59428d6767126798f798a8fa4324ec35469d4745272a0612fb4b655fb"
+          bash water-build-v7/prepare_v7.sh 2>&1 | tee prepare-v7-for-v9.log
+          patch -p1 -d ishrab_v3 < v9.patch | tee apply-v9.patch.log
+          test ! -d ishrab_v3/app/src/main/java/com/arm
+          grep -F "applicationId 'com.ishrab.smarthealth.ai.v9'" ishrab_v3/app/build.gradle
+          grep -F "versionName '9.0'" ishrab_v3/app/build.gradle
+          grep -F 'System.loadLibrary("MNN")' ishrab_v3/app/src/main/java/com/ishrab/smarthealth/MnnInferenceEngine.java
+          grep -F 'System.loadLibrary("mnn-health")' ishrab_v3/app/src/main/java/com/ishrab/smarthealth/MnnInferenceEngine.java
+          grep -F 'Llm::createLLM' ishrab_v3/app/src/main/cpp/mnn_health_jni.cpp
+          grep -F 'syncPromptCache' ishrab_v3/app/src/main/cpp/mnn_health_jni.cpp
+          grep -F 'SMOKE_TESTING' ishrab_v3/app/src/main/java/com/ishrab/smarthealth/ModelManager.java
+          grep -F 'isReady()' ishrab_v3/app/src/main/java/com/ishrab/smarthealth/RealLlmEngine.java
+          if grep -RniE 'Qwen|llama\.cpp|GGUF|libai-chat|V7|V8' \
+              ishrab_v3/app/src/main/java/com/ishrab/smarthealth/MainActivity.java \
+              ishrab_v3/app/src/main/java/com/ishrab/smarthealth/RealLlmEngine.java \
+              ishrab_v3/app/src/main/java/com/ishrab/smarthealth/ModelManager.java \
+              ishrab_v3/app/src/main/java/com/ishrab/smarthealth/MnnInferenceEngine.java; then
+            echo 'Stale AI runtime/UI copy found' >&2
+            exit 1
+          fi
+
+      - name: Build and audit 100K medical evidence DB
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --filter=blob:none --no-checkout https://github.com/abachaa/MedQuAD.git medquad
+          git -C medquad fetch --depth 1 origin 577bd37b96c02d1833b2c9eed2de9f96964e96cb
+          git -C medquad checkout --detach FETCH_HEAD
+          test "$(git -C medquad rev-parse HEAD)" = "577bd37b96c02d1833b2c9eed2de9f96964e96cb"
+          DB='ishrab_v3/app/src/main/assets/medical_knowledge_100k.db'
+          python3 water-build-v7/build_medical_knowledge.py medquad "$DB" | tee knowledge-v9.log
+          python3 - <<'PY'
+          import sqlite3
+          db='ishrab_v3/app/src/main/assets/medical_knowledge_100k.db'
+          con=sqlite3.connect(db)
+          assert con.execute('select count(*) from knowledge').fetchone()[0] == 100000
+          assert con.execute('select count(*) from knowledge_fts').fetchone()[0] == 100000
+          meta=dict(con.execute('select key,value from metadata'))
+          assert meta['knowledge_count']=='100000'
+          assert meta['dataset']=='MedQuAD'
+          print('V9 knowledge audit passed', meta)
+          con.close()
+          PY
+          sha256sum "$DB" > knowledge-v9.sha256
+          stat -c '%s' "$DB" > knowledge-v9.size
+
+      - name: Install official MNN runtime and pinned headers
+        shell: bash
+        run: |
+          set -euxo pipefail
+          curl --fail --location --retry 5 --retry-all-errors \
+            -o mnn-chat-0.8.3.apk \
+            https://meta.alicdn.com/data/mnn/apks/mnn_chat_0_8_3.apk
+          test "$(sha256sum mnn-chat-0.8.3.apk | awk '{print $1}')" = "eb249cabbf73b8b1567d7611715cad8f1cbf4df7be75cb447ea206f12f94ab14"
+          mkdir -p ishrab_v3/app/src/main/jniLibs/arm64-v8a
+          unzip -p mnn-chat-0.8.3.apk lib/arm64-v8a/libMNN.so > ishrab_v3/app/src/main/jniLibs/arm64-v8a/libMNN.so
+          test "$(stat -c '%s' ishrab_v3/app/src/main/jniLibs/arm64-v8a/libMNN.so)" = "7503192"
+          readelf -Ws ishrab_v3/app/src/main/jniLibs/arm64-v8a/libMNN.so | c++filt | grep -F 'MNN::Transformer::Llm::createLLM'
+          readelf -Ws ishrab_v3/app/src/main/jniLibs/arm64-v8a/libMNN.so | c++filt | grep -F 'MNN::Transformer::Llm::syncPromptCache'
+          git clone --filter=blob:none --no-checkout https://github.com/alibaba/MNN.git ishrab_v3/app/MNN
+          git -C ishrab_v3/app/MNN fetch --depth 1 origin 99952373d8ba76423a7b0f543833a800911eef0c
+          git -C ishrab_v3/app/MNN checkout --detach FETCH_HEAD
+          test "$(git -C ishrab_v3/app/MNN rev-parse HEAD)" = "99952373d8ba76423a7b0f543833a800911eef0c"
+          grep -F 'Llm* createLLM' ishrab_v3/app/MNN/transformers/llm/engine/include/llm/llm.hpp
+          grep -F 'syncPromptCache' ishrab_v3/app/MNN/transformers/llm/engine/include/llm/llm.hpp
+          grep -F 'const LlmContext* getContext() const' ishrab_v3/app/MNN/transformers/llm/engine/include/llm/llm.hpp
+
+      - name: Set up Android SDK NDK and CMake
+        shell: bash
+        run: |
+          set -euxo pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-35" "build-tools;35.0.0" "cmake;3.22.1" "ndk;27.2.12479018"
+
+      - name: Install Gradle 8.9 directly
+        shell: bash
+        run: |
+          set -euxo pipefail
+          curl --fail --location --retry 5 --retry-all-errors -o gradle-8.9-bin.zip https://services.gradle.org/distributions/gradle-8.9-bin.zip
+          unzip -q gradle-8.9-bin.zip -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/gradle-8.9/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/gradle-8.9/bin/gradle" --version | tee gradle-v9-version.txt
+
+      - name: Create V9 signing key
+        shell: bash
+        run: |
+          set -euxo pipefail
+          keytool -genkeypair -v \
+            -keystore "$GITHUB_WORKSPACE/ishrab-mnn-v9.jks" \
+            -storepass MnnV9_2026X \
+            -alias mnnv9 \
+            -keypass MnnV9_2026X \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Ishrab MNN Health AI V9,O=Local,C=JO"
+
+      - name: Build signed V9 APK
+        id: build
+        continue-on-error: true
+        working-directory: ishrab_v3
+        shell: bash
+        env:
+          SIGN_STORE_FILE: ${{ github.workspace }}/ishrab-mnn-v9.jks
+          SIGN_STORE_PASSWORD: MnnV9_2026X
+          SIGN_KEY_ALIAS: mnnv9
+          SIGN_KEY_PASSWORD: MnnV9_2026X
+          GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx5120m
+        run: |
+          set -o pipefail
+          gradle --no-daemon assembleRelease 2>&1 | tee "$GITHUB_WORKSPACE/build-v9.log"
+
+      - name: Upload V9 diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mnn-v9-build-log
+          path: |
+            prepare-v7-for-v9.log
+            apply-v9.patch.log
+            knowledge-v9.log
+            build-v9.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Stop after failed compilation
+        if: steps.build.outcome == 'failure'
+        run: exit 1
+
+      - name: Strict V9 APK verification
+        shell: bash
+        run: |
+          set -euxo pipefail
+          APK='ishrab_v3/app/build/outputs/apk/release/app-release.apk'
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n1)
+          AAPT2=$(find "$ANDROID_HOME/build-tools" -name aapt2 -type f | sort -V | tail -n1)
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee apk-v9-signature.txt
+          unzip -t "$APK" | tee apk-v9-unzip-test.txt
+          unzip -l "$APK" | tee apk-v9-files.txt
+          grep -F 'lib/arm64-v8a/libMNN.so' apk-v9-files.txt
+          grep -F 'lib/arm64-v8a/libmnn-health.so' apk-v9-files.txt
+          grep -F 'assets/medical_knowledge_100k.db' apk-v9-files.txt
+          grep -F 'assets/local_health_ai_v2.json' apk-v9-files.txt
+          if grep -Ei 'libai-chat|llama|\.gguf([[:space:]]|$)' apk-v9-files.txt; then
+            echo 'Forbidden old runtime artifact found' >&2
+            exit 1
+          fi
+          "$AAPT2" dump badging "$APK" | tee apk-v9-badging.txt
+          grep -F "package: name='com.ishrab.smarthealth.ai.v9' versionCode='9' versionName='9.0'" apk-v9-badging.txt
+          grep -F "minSdkVersion:'26'" apk-v9-badging.txt
+          grep -F "targetSdkVersion:'35'" apk-v9-badging.txt
+          unzip -p "$APK" assets/medical_knowledge_100k.db > embedded-v9-knowledge.db
+          python3 - <<'PY'
+          import sqlite3
+          con=sqlite3.connect('embedded-v9-knowledge.db')
+          assert con.execute('select count(*) from knowledge').fetchone()[0] == 100000
+          assert con.execute('select count(*) from knowledge_fts').fetchone()[0] == 100000
+          print('embedded V9 knowledge verified')
+          con.close()
+          PY
+          mkdir -p native-v9
+          unzip -q "$APK" 'lib/arm64-v8a/libmnn-health.so' -d native-v9
+          readelf -d native-v9/lib/arm64-v8a/libmnn-health.so | tee mnn-health-needed.txt
+          grep -F 'Shared library: [libMNN.so]' mnn-health-needed.txt
+          readelf -Ws native-v9/lib/arm64-v8a/libmnn-health.so | grep -F 'Java_com_ishrab_smarthealth_MnnInferenceEngine_nativeCreate'
+          readelf -Ws native-v9/lib/arm64-v8a/libmnn-health.so | grep -F 'Java_com_ishrab_smarthealth_MnnInferenceEngine_nativeGenerate'
+          grep -F 'LFM2.5-1.2B-Instruct-MNN' ishrab_v3/app/src/main/java/com/ishrab/smarthealth/ModelManager.java
+          grep -F '732_382_802L' ishrab_v3/app/src/main/java/com/ishrab/smarthealth/ModelManager.java
+          grep -F 'SMOKE_TESTING' ishrab_v3/app/src/main/java/com/ishrab/smarthealth/ModelManager.java
+          sha256sum "$APK" > apk-v9.sha256
+          stat -c '%s' "$APK" > apk-v9.size
+          ls -lh "$APK"
+
+      - name: Upload final V9 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ishrab-mnn-health-ai-v9-final-apk
+          path: ishrab_v3/app/build/outputs/apk/release/app-release.apk
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload final V9 audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ishrab-mnn-health-ai-v9-final-audit
+          path: |
+            apk-v9.sha256
+            apk-v9.size
+            knowledge-v9.sha256
+            knowledge-v9.size
+            apk-v9-signature.txt
+            apk-v9-unzip-test.txt
+            apk-v9-badging.txt
+            apk-v9-files.txt
+            mnn-health-needed.txt
+          if-no-files-found: warn
+          retention-days: 7
