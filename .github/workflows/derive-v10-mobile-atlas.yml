@@ -1,0 +1,33 @@
+name: Derive Ishrab V10 Mobile Atlas
+
+on:
+  push:
+    branches: [build/ishrab-mind-v10]
+    paths: ['.ci-mobile-v10']
+
+permissions:
+  contents: write
+
+jobs:
+  derive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: build/ishrab-mind-v10
+      - name: Derive compact mobile artifact
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          src=json.loads(Path('generated/case_atlas.json').read_text())
+          out={k:v for k,v in src.items() if k!='atlas'}
+          out['shippedStrata']=32
+          out['atlas']=src['atlas'][:32]
+          Path('generated/mobile_atlas.json').write_text(json.dumps(out,ensure_ascii=False,separators=(',',':')),encoding='utf-8')
+          PY
+          git config user.name 'Ishrab Clinical Trainer'
+          git config user.email 'actions@users.noreply.github.com'
+          git add generated/mobile_atlas.json
+          git commit -m 'Derive compact verified V10 mobile atlas'
+          git push origin HEAD:build/ishrab-mind-v10
