@@ -60,16 +60,24 @@ jobs:
           PY
 
       - name: Build unsigned release APK
+        id: apk_build
+        continue-on-error: true
         working-directory: /tmp/qbank/Android-Source
         env:
           QBANK_CI_UNSIGNED: '1'
+        shell: bash
         run: |
+          set +e
           gradle :app:assembleRelease --stacktrace --no-daemon \
             -PQBANK_API_BASE_URL="https://jokerx.shop/api/mobile.php?action=" \
-            -PQBANK_SITE_NAME="Qbank"
-          find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -ls
+            -PQBANK_SITE_NAME="Qbank" 2>&1 | tee /tmp/qbank-build.log
+          BUILD_EXIT=${PIPESTATUS[0]}
+          echo "$BUILD_EXIT" > /tmp/qbank-build-exit.txt
+          find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -ls 2>/dev/null || true
+          exit "$BUILD_EXIT"
 
       - name: Verify APK metadata
+        if: steps.apk_build.outcome == 'success'
         run: |
           APK=$(find /tmp/qbank/Android-Source/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -1)
           test -n "$APK"
@@ -78,6 +86,7 @@ jobs:
           cp "$APK" /tmp/Qbank-V5-6.3.0-unsigned.apk
 
       - name: Upload unsigned APK artifact
+        if: steps.apk_build.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: qbank-v630-unsigned
@@ -88,16 +97,23 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
-      - name: Publish verified APK chunks
+      - name: Publish build result
+        if: always()
         run: |
           rm -rf output/qbank-v630
           mkdir -p output/qbank-v630
-          base64 -w0 /tmp/Qbank-V5-6.3.0-unsigned.apk | split -b 700000 -d -a 3 - output/qbank-v630/apk.part-
-          cp /tmp/apk-badging.txt output/qbank-v630/
-          cp /tmp/apk-sha256.txt output/qbank-v630/
-          printf '%s\n' 'Concatenate apk.part-* in lexical order, base64-decode, then verify apk-sha256.txt.' > output/qbank-v630/README.txt
+          cp /tmp/qbank-build.log output/qbank-v630/build.log 2>/dev/null || true
+          cp /tmp/qbank-build-exit.txt output/qbank-v630/build-exit.txt 2>/dev/null || printf '%s\n' 'setup-failed' > output/qbank-v630/build-exit.txt
+          if [ -f /tmp/Qbank-V5-6.3.0-unsigned.apk ]; then
+            base64 -w0 /tmp/Qbank-V5-6.3.0-unsigned.apk | split -b 700000 -d -a 3 - output/qbank-v630/apk.part-
+            cp /tmp/apk-badging.txt output/qbank-v630/
+            cp /tmp/apk-sha256.txt output/qbank-v630/
+            printf '%s\n' 'Concatenate apk.part-* in lexical order, base64-decode, then verify apk-sha256.txt.' > output/qbank-v630/README.txt
+          else
+            printf '%s\n' 'The APK build failed. See build.log and build-exit.txt.' > output/qbank-v630/README.txt
+          fi
           git config user.name 'qbank-build-bot'
           git config user.email 'qbank-build-bot@users.noreply.github.com'
           git add output/qbank-v630
-          git commit -m 'Publish Qbank 6.3.0 unsigned APK' || exit 0
+          git commit -m 'Publish Qbank 6.3.0 build result' || exit 0
           git push
