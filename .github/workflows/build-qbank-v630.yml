@@ -7,7 +7,7 @@ on:
       - '.github/workflows/build-qbank-v630.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -77,7 +77,7 @@ jobs:
           sha256sum "$APK" | tee /tmp/apk-sha256.txt
           cp "$APK" /tmp/Qbank-V5-6.3.0-unsigned.apk
 
-      - name: Upload unsigned APK
+      - name: Upload unsigned APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: qbank-v630-unsigned
@@ -87,3 +87,17 @@ jobs:
             /tmp/apk-sha256.txt
           retention-days: 1
           if-no-files-found: error
+
+      - name: Publish verified APK chunks
+        run: |
+          rm -rf output/qbank-v630
+          mkdir -p output/qbank-v630
+          base64 -w0 /tmp/Qbank-V5-6.3.0-unsigned.apk | split -b 700000 -d -a 3 - output/qbank-v630/apk.part-
+          cp /tmp/apk-badging.txt output/qbank-v630/
+          cp /tmp/apk-sha256.txt output/qbank-v630/
+          printf '%s\n' 'Concatenate apk.part-* in lexical order, base64-decode, then verify apk-sha256.txt.' > output/qbank-v630/README.txt
+          git config user.name 'qbank-build-bot'
+          git config user.email 'qbank-build-bot@users.noreply.github.com'
+          git add output/qbank-v630
+          git commit -m 'Publish Qbank 6.3.0 unsigned APK' || exit 0
+          git push
