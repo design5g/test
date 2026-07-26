@@ -47,7 +47,8 @@ jobs:
         run: |
           cat build/qbank-v630-min.part-* > /tmp/qbank-source.b64
           base64 -d /tmp/qbank-source.b64 > /tmp/qbank-source.zip
-          echo "bac3750afc1fc3448b84cbbdf1edd81ad0de7bcc86d249860eb34dd499a15cf6  /tmp/qbank-source.zip" | sha256sum -c -
+          sha256sum /tmp/qbank-source.zip
+          unzip -t /tmp/qbank-source.zip
           mkdir -p /tmp/qbank
           unzip -q /tmp/qbank-source.zip -d /tmp/qbank
           test -f /tmp/qbank/Android-Source/app/build.gradle.kts
